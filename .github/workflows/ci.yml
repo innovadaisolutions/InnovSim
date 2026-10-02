@@ -1,0 +1,82 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-dev.lock.txt
+      - run: python -m pip install --no-deps -e .
+      - run: python -m pytest
+      - run: ruff check src tests examples
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t innovsim:ci .
+      - run: docker run -d --name innovsim-ci -p 127.0.0.1:8787:8787 innovsim:ci
+      - name: Verify container health and business loop
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+          base = 'http://127.0.0.1:8787'
+          def call(path, body=None):
+              data = None if body is None else json.dumps(body).encode()
+              request = urllib.request.Request(base + path, data=data, headers={'Content-Type': 'application/json'})
+              with urllib.request.urlopen(request, timeout=5) as response:
+                  return json.load(response)
+          for attempt in range(30):
+              try:
+                  assert call('/api/health')['status'] == 'ok'
+                  break
+              except Exception:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          with urllib.request.urlopen(base, timeout=5) as response:
+              assert response.status == 200 and b'<html' in response.read().lower()
+          scenario = next(item for item in call('/api/scenarios') if item['id'] == 'supplier-delay')
+          run = call('/api/runs', {'scenario_id': scenario['id']})
+          assert not run['metrics']['goal_success']
+          for _ in range(8):
+              if run['metrics']['goal_success']:
+                  break
+              assert run['suggestions'], 'No path from baseline to candidate success'
+              run = call('/api/runs/' + run['id'] + '/refine', {'suggestion_id': run['suggestions'][0]['id']})
+          assert run['metrics']['goal_success']
+          assert run['metrics']['policy_violations'] == 0
+          print('Container UI, API and refinement loop passed')
+          PY
+      - name: Container logs
+        if: always()
+        run: docker logs innovsim-ci || true

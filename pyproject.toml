@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "innovad-innovsim"
+version = "0.1.0"
+description = "Self-hosted, code-first simulation and refinement of business agent workflows"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{name = "Innovad AI Solutions"}]
+dependencies = ["fastapi>=0.115,<1", "pydantic>=2.8,<3", "uvicorn>=0.30,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "httpx>=0.27,<1", "ruff>=0.12,<1"]
+
+[project.scripts]
+innovsim = "agent_workbench.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_workbench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "RUF"]
